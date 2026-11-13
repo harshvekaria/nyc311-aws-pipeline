@@ -1,0 +1,7 @@
+{
+  "Version": "2012-10-17",
+  "Statement": [
+    { "Effect": "Allow", "Action": ["s3:PutObject"], "Resource": "arn:aws:s3:::nyc311-lake-YOU/bronze/*" },
+    { "Effect": "Allow", "Action": ["ssm:GetParameter"], "Resource": "arn:aws:ssm:REGION:ACCOUNT_ID:parameter/nyc311/app_token" }
+  ]
+}

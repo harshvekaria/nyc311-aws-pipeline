@@ -1,0 +1,346 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>NYC 311 Service Monitor</title>
+<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.css">
+<script src="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/plotly.js-dist-min@2.35.2/plotly.min.js"></script>
+<script src="config.js"></script>
+<style>
+  :root {
+    --bg: #f6f7f9; --panel: #ffffff; --ink: #1d2433; --muted: #5d6677; --line: #e3e6ec;
+    --accent: #2563eb; --accent-soft: #dbe6fd; --warn: #d9480f; --good: #2b8a3e; --city: #9aa3b2;
+  }
+  * { box-sizing: border-box; }
+  body { margin: 0; font: 14px/1.45 system-ui, -apple-system, "Segoe UI", Roboto, sans-serif; background: var(--bg); color: var(--ink); }
+  header { padding: 16px 24px; background: var(--panel); border-bottom: 1px solid var(--line); display: flex; justify-content: space-between; align-items: baseline; flex-wrap: wrap; gap: 8px; }
+  header h1 { margin: 0; font-size: 18px; }
+  header .meta { color: var(--muted); font-size: 12px; }
+  .layout { display: grid; grid-template-columns: 290px 1fr; gap: 16px; padding: 16px 24px; }
+  aside { background: var(--panel); border: 1px solid var(--line); border-radius: 10px; padding: 16px; align-self: start; position: sticky; top: 16px; max-height: calc(100vh - 32px); overflow: auto; }
+  aside h2 { font-size: 12px; text-transform: uppercase; letter-spacing: .06em; color: var(--muted); margin: 16px 0 8px; }
+  aside h2:first-child { margin-top: 0; }
+  .presets { display: flex; gap: 6px; flex-wrap: wrap; margin-bottom: 8px; }
+  button { font: inherit; border: 1px solid var(--line); background: var(--panel); border-radius: 6px; padding: 4px 10px; cursor: pointer; color: var(--ink); }
+  button:hover { border-color: var(--accent); }
+  button.on { background: var(--accent); border-color: var(--accent); color: #fff; }
+  input[type=date], input[type=search] { width: 100%; font: inherit; padding: 6px 8px; border: 1px solid var(--line); border-radius: 6px; margin-bottom: 6px; }
+  .checklist { max-height: 210px; overflow: auto; border: 1px solid var(--line); border-radius: 6px; padding: 4px 8px; }
+  .checklist label { display: flex; gap: 6px; align-items: center; padding: 2px 0; cursor: pointer; font-size: 13px; }
+  .checklist label span.n { margin-left: auto; color: var(--muted); font-size: 11px; }
+  .chips { display: flex; flex-wrap: wrap; gap: 4px; margin: 6px 0; min-height: 4px; }
+  .chip { background: var(--accent-soft); color: var(--accent); border-radius: 999px; padding: 1px 8px; font-size: 12px; cursor: pointer; }
+  .chip::after { content: " ×"; }
+  main { display: grid; gap: 16px; min-width: 0; }
+  .kpis { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 12px; }
+  .kpi { background: var(--panel); border: 1px solid var(--line); border-radius: 10px; padding: 12px 16px; }
+  .kpi .label { color: var(--muted); font-size: 12px; }
+  .kpi .value { font-size: 24px; font-weight: 650; font-variant-numeric: tabular-nums; }
+  .kpi .sub { color: var(--muted); font-size: 12px; }
+  .grid2 { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 16px; }
+  .card { background: var(--panel); border: 1px solid var(--line); border-radius: 10px; padding: 12px 16px; min-width: 0; }
+  .card h3 { margin: 0 0 2px; font-size: 15px; }
+  .card p.hint { margin: 0 0 8px; color: var(--muted); font-size: 12px; }
+  .chart { width: 100%; height: 340px; }
+  #map { height: 420px; border-radius: 8px; }
+  .maptools { display: flex; gap: 6px; margin-bottom: 8px; flex-wrap: wrap; }
+  .legend { background: #fff; padding: 6px 8px; border-radius: 6px; font-size: 11px; line-height: 1.4; box-shadow: 0 1px 4px rgba(0,0,0,.15); }
+  .legend i { display: inline-block; width: 14px; height: 10px; margin-right: 4px; }
+  #status { position: fixed; right: 16px; bottom: 16px; background: var(--ink); color: #fff; padding: 6px 12px; border-radius: 6px; font-size: 12px; opacity: 0; transition: opacity .2s; pointer-events: none; }
+  #status.show { opacity: .9; }
+  #error { display: none; background: #fff4e6; border: 1px solid #ffc078; color: #873800; padding: 10px 14px; border-radius: 8px; }
+  @media (max-width: 1000px) { .layout { grid-template-columns: 1fr; padding: 12px 16px; } aside { position: static; max-height: none; } .grid2 { grid-template-columns: 1fr; } .kpis { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
+</style>
+</head>
+<body>
+<header>
+  <h1>NYC 311 Service Monitor</h1>
+  <div class="meta" id="meta">Loading…</div>
+</header>
+
+<div class="layout">
+  <aside>
+    <h2>Time horizon (created date)</h2>
+    <div class="presets" id="presets">
+      <button data-days="30">30 days</button>
+      <button data-days="90">90 days</button>
+      <button data-days="all" class="on">All</button>
+    </div>
+    <input type="date" id="start"><input type="date" id="end">
+
+    <h2>Council districts</h2>
+    <div class="chips" id="districtChips"></div>
+    <input type="search" id="districtSearch" placeholder="Filter districts…">
+    <div class="checklist" id="districtList"></div>
+
+    <h2>Complaint types</h2>
+    <div class="chips" id="typeChips"></div>
+    <input type="search" id="typeSearch" placeholder="Search e.g. pothole, dumping…">
+    <div class="checklist" id="typeList"></div>
+
+    <h2>&nbsp;</h2>
+    <button id="reset">Reset all filters</button>
+    <p style="color:var(--muted);font-size:12px;margin-top:12px">Tip: click a district on the map or a bar in the complaint chart to add it to the filters.</p>
+  </aside>
+
+  <main>
+    <div id="error"></div>
+    <section class="kpis">
+      <div class="kpi"><div class="label">Service requests</div><div class="value" id="kTotal">–</div><div class="sub" id="kTotalSub"></div></div>
+      <div class="kpi"><div class="label">Closed</div><div class="value" id="kClosed">–</div><div class="sub" id="kClosedSub"></div></div>
+      <div class="kpi"><div class="label">Still open</div><div class="value" id="kOpen">–</div><div class="sub" id="kOpenSub"></div></div>
+      <div class="kpi"><div class="label">Avg resolution time</div><div class="value" id="kAvg">–</div><div class="sub">closed cases only</div></div>
+    </section>
+
+    <section class="card">
+      <h3>Where demand and delays concentrate</h3>
+      <p class="hint">Council districts shaded by the chosen measure for the current date and complaint filters. Outlined districts are selected.</p>
+      <div class="maptools" id="mapMetric">
+        <button data-m="total" class="on">Request volume</button>
+        <button data-m="avg_resolution_hours">Avg resolution (hrs)</button>
+        <button data-m="open_to_closed_ratio">Open : closed ratio</button>
+      </div>
+      <div id="map"></div>
+    </section>
+
+    <section class="grid2">
+      <div class="card"><h3>Daily request volume</h3><p class="hint">Requests created per day with 7-day average; drag on the chart to zoom the time horizon.</p><div class="chart" id="cDaily"></div></div>
+      <div class="card"><h3>Weekly volume</h3><p class="hint">Peak weeks are highlighted.</p><div class="chart" id="cWeekly"></div></div>
+    </section>
+
+    <section class="grid2">
+      <div class="card"><h3>Top complaint types: selection vs citywide</h3><p class="hint">Share of requests in the selected districts compared with the whole city. Click a bar to filter.</p><div class="chart" id="cComplaints" style="height:420px"></div></div>
+      <div class="card"><h3>Agency efficiency</h3><p class="hint">Average hours from creation to closure (agencies with ≥ 20 closed cases).</p><div class="chart" id="cAgency" style="height:420px"></div></div>
+    </section>
+
+    <section class="grid2">
+      <div class="card"><h3>District performance</h3><p class="hint">Average resolution hours per council district; selected districts in blue.</p><div class="chart" id="cDistrict"></div></div>
+      <div class="card"><h3>Bottlenecks: open-to-closed ratio</h3><p class="hint">Districts above the dashed city-average line are flagged as bottlenecks.</p><div class="chart" id="cBottleneck"></div></div>
+    </section>
+  </main>
+</div>
+<div id="status">Updating…</div>
+
+<script>
+const API = (window.APP_CONFIG && window.APP_CONFIG.API_URL || '').replace(/\/$/, '');
+const css = n => getComputedStyle(document.documentElement).getPropertyValue(n).trim();
+const C = { accent: css('--accent'), warn: css('--warn'), city: css('--city'), good: css('--good'), muted: css('--muted'), line: css('--line') };
+const fmt = n => n == null ? '–' : Number(n).toLocaleString('en-US');
+const pct = (a, b) => b ? (100 * a / b).toFixed(1) + '%' : '–';
+const plotCfg = { displayModeBar: false, responsive: true };
+// Plotly writes into the layout objects it is given, so every chart gets a fresh copy.
+const base = () => ({ margin: { l: 48, r: 12, t: 8, b: 40 }, paper_bgcolor: 'rgba(0,0,0,0)', plot_bgcolor: 'rgba(0,0,0,0)', font: { family: 'system-ui, sans-serif', size: 12, color: '#1d2433' }, xaxis: { gridcolor: C.line, automargin: true }, yaxis: { gridcolor: C.line, automargin: true } });
+
+const state = { districts: new Set(), types: new Set(), start: '', end: '', mapMetric: 'total' };
+let bounds = { min: '2026-04-01', max: '' }, allDistricts = [], allTypes = [], lastData = null;
+
+// ---------- URL hash keeps the view shareable ----------
+function writeHash() {
+  const p = new URLSearchParams();
+  if (state.districts.size) p.set('d', [...state.districts].join(','));
+  if (state.types.size) p.set('t', [...state.types].join('|'));
+  if (state.start) p.set('s', state.start);
+  if (state.end) p.set('e', state.end);
+  history.replaceState(null, '', '#' + p.toString());
+}
+function readHash() {
+  const p = new URLSearchParams(location.hash.slice(1));
+  (p.get('d') || '').split(',').filter(Boolean).forEach(d => state.districts.add(+d));
+  (p.get('t') || '').split('|').filter(Boolean).forEach(t => state.types.add(t));
+  state.start = p.get('s') || ''; state.end = p.get('e') || '';
+}
+
+// ---------- API ----------
+async function api(path, params) {
+  const url = API + path + (params ? '?' + new URLSearchParams(params) : '');
+  const r = await fetch(url);
+  if (!r.ok) throw new Error(`${r.status} ${await r.text()}`);
+  return r.json();
+}
+let pending = 0, debounceTimer;
+function refresh() { clearTimeout(debounceTimer); debounceTimer = setTimeout(load, 250); }
+async function load() {
+  writeHash(); renderChips();
+  const ticket = ++pending;
+  document.getElementById('status').classList.add('show');
+  const params = { start: state.start || bounds.min, end: state.end || bounds.max };
+  if (state.districts.size) params.districts = [...state.districts].join(',');
+  if (state.types.size) params.types = [...state.types].join('|');
+  try {
+    const data = await api('/dashboard', params);
+    if (ticket !== pending) return;            // a newer request superseded this one
+    lastData = data; render(data);
+    showError('');
+  } catch (e) { showError('Could not load data: ' + e.message); }
+  finally { if (ticket === pending) document.getElementById('status').classList.remove('show'); }
+}
+function showError(msg) { const el = document.getElementById('error'); el.textContent = msg; el.style.display = msg ? 'block' : 'none'; }
+
+// ---------- filter panel ----------
+function checklist(el, items, set, labelFn, valueFn, query) {
+  const q = (query || '').toLowerCase();
+  el.innerHTML = '';
+  items.filter(i => labelFn(i).toLowerCase().includes(q)).slice(0, 300).forEach(i => {
+    const v = valueFn(i), lab = document.createElement('label'), cb = document.createElement('input');
+    cb.type = 'checkbox'; cb.checked = set.has(v);
+    cb.onchange = () => { cb.checked ? set.add(v) : set.delete(v); refresh(); };
+    const t = document.createElement('span'); t.textContent = labelFn(i);
+    const n = document.createElement('span'); n.className = 'n'; n.textContent = fmt(i.n);
+    lab.append(cb, t, n); el.append(lab);
+  });
+}
+const dLabel = d => `District ${d.id} · ${(d.borough || '').replace('UNSPECIFIED', '').toLowerCase()}`;
+function renderLists() {
+  checklist(document.getElementById('districtList'), allDistricts, state.districts, dLabel, d => d.id, document.getElementById('districtSearch').value);
+  checklist(document.getElementById('typeList'), allTypes, state.types, t => t.name, t => t.name, document.getElementById('typeSearch').value);
+}
+function renderChips() {
+  const mk = (el, set, label) => {
+    el.innerHTML = '';
+    [...set].forEach(v => { const c = document.createElement('span'); c.className = 'chip'; c.textContent = label(v); c.onclick = () => { set.delete(v); renderLists(); refresh(); }; el.append(c); });
+  };
+  mk(document.getElementById('districtChips'), state.districts, v => 'D' + v);
+  mk(document.getElementById('typeChips'), state.types, v => v);
+  document.getElementById('start').value = state.start || bounds.min;
+  document.getElementById('end').value = state.end || bounds.max;
+}
+function toggle(set, v) { set.has(v) ? set.delete(v) : set.add(v); renderLists(); refresh(); }
+
+document.getElementById('districtSearch').oninput = renderLists;
+document.getElementById('typeSearch').oninput = renderLists;
+document.getElementById('start').onchange = e => { state.start = e.target.value; setPreset(null); refresh(); };
+document.getElementById('end').onchange = e => { state.end = e.target.value; setPreset(null); refresh(); };
+function setPreset(btn) { document.querySelectorAll('#presets button').forEach(b => b.classList.toggle('on', b === btn)); }
+document.querySelectorAll('#presets button').forEach(b => b.onclick = () => {
+  setPreset(b);
+  if (b.dataset.days === 'all') { state.start = ''; state.end = ''; }
+  else { const end = new Date(bounds.max + 'T00:00:00'); const s = new Date(end); s.setDate(s.getDate() - (+b.dataset.days - 1));
+         state.end = bounds.max; state.start = s.toISOString().slice(0, 10) < bounds.min ? bounds.min : s.toISOString().slice(0, 10); }
+  refresh();
+});
+document.getElementById('reset').onclick = () => { state.districts.clear(); state.types.clear(); state.start = state.end = ''; setPreset(document.querySelector('#presets [data-days=all]')); renderLists(); refresh(); };
+document.querySelectorAll('#mapMetric button').forEach(b => b.onclick = () => {
+  document.querySelectorAll('#mapMetric button').forEach(x => x.classList.toggle('on', x === b));
+  state.mapMetric = b.dataset.m; if (lastData) renderMap(lastData);
+});
+
+// ---------- map ----------
+const map = L.map('map', { scrollWheelZoom: false }).setView([40.705, -73.96], 10);
+L.tileLayer('https://tile.openstreetmap.org/{z}/{x}/{y}.png', { attribution: '© OpenStreetMap contributors', maxZoom: 16 }).addTo(map);
+let geoLayer = null, legend = null;
+const districtOf = f => +(f.properties.coundist ?? f.properties.CounDist ?? f.properties.council_district ?? f.properties.district);
+const ramp = ['#eef3fd', '#c6d7fa', '#8fb0f3', '#5585e8', '#2b5fd1', '#163f99'];
+fetch('council_districts.geojson').then(r => r.json()).then(gj => {
+  geoLayer = L.geoJSON(gj, {
+    style: { weight: 1, color: '#fff', fillOpacity: .8 },
+    onEachFeature: (f, layer) => layer.on({ click: () => toggle(state.districts, districtOf(f)) })
+  }).addTo(map);
+  if (lastData) renderMap(lastData);
+}).catch(() => showError('council_districts.geojson not found next to index.html — the map is disabled.'));
+
+function renderMap(data) {
+  if (!geoLayer) return;
+  const m = state.mapMetric, byId = Object.fromEntries(data.by_district.map(d => [d.council_district, d]));
+  const vals = data.by_district.map(d => +d[m]).filter(v => isFinite(v)).sort((a, b) => a - b);
+  const q = p => vals.length ? vals[Math.min(vals.length - 1, Math.floor(p * vals.length))] : 0;
+  const breaks = [q(1/6), q(2/6), q(3/6), q(4/6), q(5/6)];
+  const color = v => v == null || !isFinite(v) ? '#e9ecef' : ramp[breaks.filter(b => v >= b).length];
+  geoLayer.eachLayer(l => {
+    const id = districtOf(l.feature), d = byId[id], v = d ? +d[m] : null, sel = state.districts.has(id);
+    l.setStyle({ fillColor: color(v), weight: sel ? 3 : 1, color: sel ? '#111' : '#fff' });
+    l.bindTooltip(d ? `<b>District ${id}</b><br>${fmt(d.total)} requests<br>${d.avg_resolution_hours ?? '–'} avg hrs<br>open:closed ${d.open_to_closed_ratio ?? '–'}${d.is_bottleneck ? '<br><b style="color:#d9480f">Bottleneck</b>' : ''}` : `District ${id}: no data`, { sticky: true });
+  });
+  if (legend) legend.remove();
+  legend = L.control({ position: 'bottomright' });
+  legend.onAdd = () => { const div = L.DomUtil.create('div', 'legend'); const name = { total: 'Requests', avg_resolution_hours: 'Avg hrs', open_to_closed_ratio: 'Open:closed' }[m];
+    div.innerHTML = `<b>${name}</b><br>` + ramp.map((c, i) => `<i style="background:${c}"></i>${i === 0 ? '< ' + fmtB(breaks[0]) : '≥ ' + fmtB(breaks[i - 1])}`).join('<br>'); return div; };
+  legend.addTo(map);
+}
+const fmtB = v => v >= 100 ? Math.round(v).toLocaleString() : (+v).toFixed(2);
+
+// ---------- charts ----------
+function render(d) {
+  const k = d.kpis;
+  document.getElementById('kTotal').textContent = fmt(k.total);
+  document.getElementById('kTotalSub').textContent = `${d.filters.start} → ${d.filters.end}`;
+  document.getElementById('kClosed').textContent = fmt(k.closed);
+  document.getElementById('kClosedSub').textContent = pct(k.closed, k.total) + ' of requests';
+  document.getElementById('kOpen').textContent = fmt(k.open);
+  document.getElementById('kOpenSub').textContent = pct(k.open, k.total) + ' backlog';
+  document.getElementById('kAvg').textContent = k.avg_resolution_hours == null ? '–' : `${k.avg_resolution_hours} h`;
+
+  // daily
+  const days = d.daily.map(r => r.day), n = d.daily.map(r => +r.n);
+  const ma = n.map((_, i) => { const w = n.slice(Math.max(0, i - 6), i + 1); return w.reduce((a, b) => a + b, 0) / w.length; });
+  Plotly.react('cDaily', [
+    { x: days, y: n, type: 'scatter', mode: 'lines', name: 'Daily', line: { color: C.city, width: 1 } },
+    { x: days, y: ma, type: 'scatter', mode: 'lines', name: '7-day avg', line: { color: C.accent, width: 2.5 } },
+  ], { ...base(), legend: { orientation: 'h', y: 1.1 }, xaxis: { ...base().xaxis, type: 'date' } }, plotCfg);
+
+  // weekly with peaks
+  const wk = d.weekly.map(r => +r.n), top = [...wk].sort((a, b) => b - a).slice(0, 3);
+  Plotly.react('cWeekly', [{ x: d.weekly.map(r => r.week), y: wk, type: 'bar',
+    marker: { color: wk.map(v => top.includes(v) ? C.warn : C.accent) }, hovertemplate: 'Week of %{x|%b %d}: %{y:,} requests<extra></extra>' }],
+    { ...base(), xaxis: { ...base().xaxis, type: 'date', tickformat: '%b %d' } }, plotCfg);
+
+  // complaints: selection vs citywide share
+  const cp = [...d.complaints].reverse();
+  Plotly.react('cComplaints', [
+    { y: cp.map(r => r.complaint_type), x: cp.map(r => +r.citywide_share_pct), type: 'bar', orientation: 'h', name: 'Citywide', marker: { color: C.city } },
+    { y: cp.map(r => r.complaint_type), x: cp.map(r => +r.selection_share_pct), type: 'bar', orientation: 'h', name: state.districts.size ? 'Selected districts' : 'All districts', marker: { color: cp.map(r => state.types.has(r.complaint_type) ? C.warn : C.accent) },
+      customdata: cp.map(r => r.selection_count), hovertemplate: '%{y}: %{x:.1f}% (%{customdata:,} requests)<extra></extra>' },
+  ], { ...base(), barmode: 'group', margin: { ...base().margin, l: 190 }, legend: { orientation: 'h', y: 1.06 }, xaxis: { ...base().xaxis, ticksuffix: '%' }, yaxis: { ...base().yaxis, type: 'category' } }, plotCfg);
+  const cc = document.getElementById('cComplaints'); cc.removeAllListeners('plotly_click');
+  cc.on('plotly_click', ev => toggle(state.types, ev.points[0].y));
+
+  // agencies
+  const ag = [...d.agencies].filter(r => r.avg_resolution_hours != null).reverse();
+  Plotly.react('cAgency', [{ y: ag.map(r => r.agency), x: ag.map(r => +r.avg_resolution_hours), type: 'bar', orientation: 'h', marker: { color: C.accent },
+    customdata: ag.map(r => [r.total, r.closed]), hovertemplate: '%{y}: %{x:.1f} h avg<br>%{customdata[0]:,} requests, %{customdata[1]:,} closed<extra></extra>' }],
+    { ...base(), margin: { ...base().margin, l: 70 }, xaxis: { ...base().xaxis, title: 'hours' }, yaxis: { ...base().yaxis, type: 'category' } }, plotCfg);
+
+  // district performance
+  const ds = [...d.by_district].sort((a, b) => (+b.avg_resolution_hours || 0) - (+a.avg_resolution_hours || 0));
+  Plotly.react('cDistrict', [{ x: ds.map(r => 'D' + r.council_district), y: ds.map(r => +r.avg_resolution_hours), type: 'bar',
+    marker: { color: ds.map(r => state.districts.has(r.council_district) ? C.accent : C.city) }, customdata: ds.map(r => r.total),
+    hovertemplate: '%{x}: %{y:.1f} h avg, %{customdata:,} requests<extra></extra>' }],
+    { ...base(), xaxis: { ...base().xaxis, tickangle: -60, tickfont: { size: 9 } }, yaxis: { ...base().yaxis, title: 'avg hours' } }, plotCfg);
+  const cd = document.getElementById('cDistrict'); cd.removeAllListeners('plotly_click'); cd.on('plotly_click', ev => toggle(state.districts, +ev.points[0].x.slice(1)));
+
+  // bottlenecks
+  const bn = [...d.by_district].sort((a, b) => (+b.open_to_closed_ratio || 0) - (+a.open_to_closed_ratio || 0));
+  const city = bn.length ? +bn[0].city_ratio : 0;
+  Plotly.react('cBottleneck', [{ x: bn.map(r => 'D' + r.council_district), y: bn.map(r => +r.open_to_closed_ratio), type: 'bar',
+    marker: { color: bn.map(r => r.is_bottleneck ? C.warn : C.city), line: { color: bn.map(r => state.districts.has(r.council_district) ? '#111' : 'rgba(0,0,0,0)'), width: 2 } },
+    hovertemplate: '%{x}: %{y:.3f} open per closed<extra></extra>' }],
+    { ...base(), xaxis: { ...base().xaxis, tickangle: -60, tickfont: { size: 9 } },
+      shapes: [{ type: 'line', xref: 'paper', x0: 0, x1: 1, y0: city, y1: city, line: { dash: 'dash', color: '#1d2433', width: 1.5 } }],
+      annotations: [{ xref: 'paper', x: 1, y: city, yanchor: 'bottom', xanchor: 'right', text: `city avg ${city.toFixed(3)}`, showarrow: false, font: { size: 11 } }] }, plotCfg);
+
+  renderMap(d);
+}
+// Drag-zoom on the daily chart sets the time horizon filter.
+function wireZoom() {
+  document.getElementById('cDaily').on('plotly_relayout', ev => {
+    if (ev['xaxis.range[0]']) { state.start = ev['xaxis.range[0]'].slice(0, 10); state.end = ev['xaxis.range[1]'].slice(0, 10); setPreset(null); refresh(); }
+  });
+}
+
+// ---------- boot ----------
+(async function init() {
+  if (!API) { showError('Set API_URL in config.js'); return; }
+  readHash();
+  try {
+    const f = await api('/filters');
+    bounds = { min: (f.date_bounds.min || '2026-04-01').slice(0, 10), max: (f.date_bounds.max || '').slice(0, 10) };
+    allDistricts = f.districts; allTypes = f.complaint_types;
+    document.getElementById('meta').textContent = `Data ${bounds.min} → ${bounds.max} · refreshed ${f.last_loaded ? new Date(f.last_loaded).toLocaleString() : 'n/a'} · source: NYC Open Data 311`;
+    if (state.start || state.end) setPreset(null);
+    renderLists(); await load(); wireZoom();
+  } catch (e) { showError('Could not reach the API: ' + e.message); }
+})();
+</script>
+</body>
+</html>

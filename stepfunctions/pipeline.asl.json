@@ -1,0 +1,76 @@
+{
+  "Comment": "NYC 311 Medallion pipeline: plan -> ingest days in parallel (Bronze) -> Silver -> Gold -> load Postgres. Replace REGION and ACCOUNT_ID.",
+  "StartAt": "PlanDates",
+  "States": {
+    "PlanDates": {
+      "Type": "Task",
+      "Resource": "arn:aws:states:::lambda:invoke",
+      "Parameters": {
+        "FunctionName": "arn:aws:lambda:REGION:ACCOUNT_ID:function:nyc311-plan-dates",
+        "Payload.$": "$"
+      },
+      "ResultSelector": { "dates.$": "$.Payload.dates" },
+      "ResultPath": "$.plan",
+      "Next": "IngestBronze"
+    },
+    "IngestBronze": {
+      "Type": "Map",
+      "ItemsPath": "$.plan.dates",
+      "MaxConcurrency": 4,
+      "ItemProcessor": {
+        "ProcessorConfig": { "Mode": "INLINE" },
+        "StartAt": "IngestDay",
+        "States": {
+          "IngestDay": {
+            "Type": "Task",
+            "Resource": "arn:aws:states:::lambda:invoke",
+            "Parameters": {
+              "FunctionName": "arn:aws:lambda:REGION:ACCOUNT_ID:function:nyc311-ingest-bronze",
+              "Payload": { "date.$": "$" }
+            },
+            "ResultSelector": { "date.$": "$.Payload.date", "records.$": "$.Payload.record_count" },
+            "Retry": [
+              {
+                "ErrorEquals": ["States.ALL"],
+                "IntervalSeconds": 10,
+                "MaxAttempts": 3,
+                "BackoffRate": 2.0
+              }
+            ],
+            "End": true
+          }
+        }
+      },
+      "ResultPath": "$.ingest",
+      "Next": "SilverTransform"
+    },
+    "SilverTransform": {
+      "Type": "Task",
+      "Resource": "arn:aws:states:::glue:startJobRun.sync",
+      "Parameters": { "JobName": "nyc311-silver" },
+      "ResultPath": "$.silver",
+      "Next": "GoldAggregate"
+    },
+    "GoldAggregate": {
+      "Type": "Task",
+      "Resource": "arn:aws:states:::glue:startJobRun.sync",
+      "Parameters": { "JobName": "nyc311-gold" },
+      "ResultPath": "$.gold",
+      "Next": "LoadPostgres"
+    },
+    "LoadPostgres": {
+      "Type": "Task",
+      "Resource": "arn:aws:states:::lambda:invoke",
+      "Parameters": {
+        "FunctionName": "arn:aws:lambda:REGION:ACCOUNT_ID:function:nyc311-load-gold",
+        "Payload": {}
+      },
+      "ResultSelector": { "loaded.$": "$.Payload.loaded" },
+      "ResultPath": "$.load",
+      "Retry": [
+        { "ErrorEquals": ["States.ALL"], "IntervalSeconds": 30, "MaxAttempts": 2, "BackoffRate": 2.0 }
+      ],
+      "End": true
+    }
+  }
+}
