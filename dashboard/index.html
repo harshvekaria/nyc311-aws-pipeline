@@ -42,6 +42,12 @@
   .grid2 { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 16px; }
   .card { background: var(--panel); border: 1px solid var(--line); border-radius: 10px; padding: 12px 16px; min-width: 0; }
   .card h3 { margin: 0 0 2px; font-size: 15px; }
+  .card-head { display: flex; justify-content: space-between; align-items: baseline; gap: 8px; }
+  button.dl { font-size: 12px; padding: 2px 8px; white-space: nowrap; color: var(--muted); }
+  button.dl:hover { color: var(--accent); }
+  button.primary { background: var(--accent); border-color: var(--accent); color: #fff; width: 100%; padding: 6px 10px; }
+  button.primary:disabled { opacity: .6; cursor: wait; }
+  .note { color: var(--muted); font-size: 12px; margin: 6px 0 0; }
   .card p.hint { margin: 0 0 8px; color: var(--muted); font-size: 12px; }
   .chart { width: 100%; height: 340px; }
   #map { height: 420px; border-radius: 8px; }
@@ -82,6 +88,10 @@
 
     <h2>&nbsp;</h2>
     <button id="reset">Reset all filters</button>
+
+    <h2>Download</h2>
+    <button id="exportBtn" class="primary">Download filtered data (CSV)</button>
+    <p class="note">Daily counts by district, complaint type and agency for the current filters, up to 50,000 rows. Each chart also has its own CSV button.</p>
     <p style="color:var(--muted);font-size:12px;margin-top:12px">Tip: click a district on the map or a bar in the complaint chart to add it to the filters.</p>
   </aside>
 
@@ -95,7 +105,7 @@
     </section>
 
     <section class="card">
-      <h3>Where demand and delays concentrate</h3>
+      <div class="card-head"><h3>Where demand and delays concentrate</h3><button class="dl" data-dl="districts" title="Download this chart's data as CSV">&#8681; CSV</button></div>
       <p class="hint">Council districts shaded by the chosen measure for the current date and complaint filters. Outlined districts are selected.</p>
       <div class="maptools" id="mapMetric">
         <button data-m="total" class="on">Request volume</button>
@@ -106,18 +116,18 @@
     </section>
 
     <section class="grid2">
-      <div class="card"><h3>Daily request volume</h3><p class="hint">Requests created per day with 7-day average; drag on the chart to zoom the time horizon.</p><div class="chart" id="cDaily"></div></div>
-      <div class="card"><h3>Weekly volume</h3><p class="hint">Peak weeks are highlighted.</p><div class="chart" id="cWeekly"></div></div>
+      <div class="card"><div class="card-head"><h3>Daily request volume</h3><button class="dl" data-dl="daily" title="Download this chart's data as CSV">&#8681; CSV</button></div><p class="hint">Requests created per day with 7-day average; drag on the chart to zoom the time horizon.</p><div class="chart" id="cDaily"></div></div>
+      <div class="card"><div class="card-head"><h3>Weekly volume</h3><button class="dl" data-dl="weekly" title="Download this chart's data as CSV">&#8681; CSV</button></div><p class="hint">Peak weeks are highlighted.</p><div class="chart" id="cWeekly"></div></div>
     </section>
 
     <section class="grid2">
-      <div class="card"><h3>Top complaint types: selection vs citywide</h3><p class="hint">Share of requests in the selected districts compared with the whole city. Click a bar to filter.</p><div class="chart" id="cComplaints" style="height:420px"></div></div>
-      <div class="card"><h3>Agency efficiency</h3><p class="hint">Average hours from creation to closure (agencies with ≥ 20 closed cases).</p><div class="chart" id="cAgency" style="height:420px"></div></div>
+      <div class="card"><div class="card-head"><h3>Top complaint types: selection vs citywide</h3><button class="dl" data-dl="complaints" title="Download this chart's data as CSV">&#8681; CSV</button></div><p class="hint">Share of requests in the selected districts compared with the whole city. Click a bar to filter.</p><div class="chart" id="cComplaints" style="height:420px"></div></div>
+      <div class="card"><div class="card-head"><h3>Agency efficiency</h3><button class="dl" data-dl="agencies" title="Download this chart's data as CSV">&#8681; CSV</button></div><p class="hint">Average hours from creation to closure (agencies with ≥ 20 closed cases).</p><div class="chart" id="cAgency" style="height:420px"></div></div>
     </section>
 
     <section class="grid2">
-      <div class="card"><h3>District performance</h3><p class="hint">Average resolution hours per council district; selected districts in blue.</p><div class="chart" id="cDistrict"></div></div>
-      <div class="card"><h3>Bottlenecks: open-to-closed ratio</h3><p class="hint">Districts above the dashed city-average line are flagged as bottlenecks.</p><div class="chart" id="cBottleneck"></div></div>
+      <div class="card"><div class="card-head"><h3>District performance</h3><button class="dl" data-dl="districts" title="Download this chart's data as CSV">&#8681; CSV</button></div><p class="hint">Average resolution hours per council district; selected districts in blue.</p><div class="chart" id="cDistrict"></div></div>
+      <div class="card"><div class="card-head"><h3>Bottlenecks: open-to-closed ratio</h3><button class="dl" data-dl="districts" title="Download this chart's data as CSV">&#8681; CSV</button></div><p class="hint">Districts above the dashed city-average line are flagged as bottlenecks.</p><div class="chart" id="cBottleneck"></div></div>
     </section>
   </main>
 </div>
@@ -327,6 +337,60 @@ function wireZoom() {
     if (ev['xaxis.range[0]']) { state.start = ev['xaxis.range[0]'].slice(0, 10); state.end = ev['xaxis.range[1]'].slice(0, 10); setPreset(null); refresh(); }
   });
 }
+
+
+// ---------- downloads ----------
+function currentParams() {
+  const p = { start: state.start || bounds.min, end: state.end || bounds.max };
+  if (state.districts.size) p.districts = [...state.districts].join(',');
+  if (state.types.size) p.types = [...state.types].join('|');
+  return p;
+}
+function fileName(kind) {
+  const p = currentParams();
+  const parts = ['nyc311', kind, p.start, 'to', p.end];
+  if (state.districts.size) parts.push('d' + [...state.districts].sort((a, b) => a - b).join('-'));
+  if (state.types.size) parts.push(state.types.size + 'types');
+  return parts.join('_').replace(/[^A-Za-z0-9_.-]/g, '') + '.csv';
+}
+function saveFile(text, name) {
+  const blob = new Blob(['﻿' + text], { type: 'text/csv;charset=utf-8' });  // BOM so Excel reads UTF-8
+  const a = document.createElement('a');
+  a.href = URL.createObjectURL(blob); a.download = name;
+  document.body.append(a); a.click(); a.remove();
+  setTimeout(() => URL.revokeObjectURL(a.href), 1000);
+}
+function toCSV(rows, cols) {
+  const esc = v => { if (v == null) return ''; const t = String(v); return /[",\n\r]/.test(t) ? '"' + t.replace(/"/g, '""') + '"' : t; };
+  return [cols.join(','), ...rows.map(r => cols.map(c => esc(r[c])).join(','))].join('\n');
+}
+const CHART_DATA = {
+  districts: d => ({ rows: d.by_district, cols: ['council_district', 'borough', 'total', 'closed', 'open', 'avg_resolution_hours', 'open_to_closed_ratio', 'city_ratio', 'is_bottleneck'] }),
+  daily: d => {
+    const n = d.daily.map(r => +r.n);
+    const rows = d.daily.map((r, i) => { const w = n.slice(Math.max(0, i - 6), i + 1); return { ...r, rolling_7d_avg: (w.reduce((a, b) => a + b, 0) / w.length).toFixed(1) }; });
+    return { rows, cols: ['day', 'n', 'closed', 'rolling_7d_avg'] };
+  },
+  weekly: d => ({ rows: d.weekly, cols: ['week', 'n'] }),
+  complaints: d => ({ rows: d.complaints, cols: ['complaint_type', 'selection_count', 'selection_share_pct', 'citywide_share_pct'] }),
+  agencies: d => ({ rows: d.agencies, cols: ['agency', 'total', 'closed', 'avg_resolution_hours'] }),
+};
+document.querySelectorAll('button.dl').forEach(b => b.onclick = () => {
+  if (!lastData) return;
+  const { rows, cols } = CHART_DATA[b.dataset.dl](lastData);
+  saveFile(toCSV(rows, cols), fileName(b.dataset.dl));
+});
+document.getElementById('exportBtn').onclick = async () => {
+  const btn = document.getElementById('exportBtn'), label = btn.textContent;
+  btn.disabled = true; btn.textContent = 'Preparing download…';
+  try {
+    const r = await fetch(API + '/export?' + new URLSearchParams(currentParams()));
+    if (!r.ok) { let m = r.statusText; try { m = (await r.json()).error || m; } catch (e) {} throw new Error(m); }
+    saveFile(await r.text(), fileName('detail'));
+    showError('');
+  } catch (e) { showError('Download failed: ' + e.message); }
+  finally { btn.disabled = false; btn.textContent = label; }
+};
 
 // ---------- boot ----------
 (async function init() {

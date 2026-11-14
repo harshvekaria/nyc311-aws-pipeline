@@ -112,6 +112,7 @@ The fact table stores sums and counts, never averages, so any filtered average i
 - Temporal: daily volume with 7-day average; weekly volume with peak weeks highlighted.
 - Categorical: selection vs citywide complaint mix, agency resolution times, district resolution times, bottleneck districts against the city average.
 - The URL stores the current filters, so a filtered view can be shared as a link.
+- Downloads: every chart has a CSV button for the data behind it, and **Download filtered data** exports the daily rows (day × district × complaint type × agency) for the current filters through the API's `/export` route, capped at 50,000 rows per download.
 
 The first and last bars of the weekly chart can be partial weeks when a date filter cuts through a week. Open-to-closed ratios are naturally higher for recent dates because newer cases have had less time to close.
 
@@ -143,7 +144,7 @@ Queries are in `sql/athena.sql`.
 | `glue/silver_transform.py` | Silver job |
 | `glue/gold_aggregate.py` | Gold job |
 | `lambdas/load_gold/` | Gold CSV → PostgreSQL |
-| `lambdas/api/` | Dashboard API (`/filters`, `/dashboard`) |
+| `lambdas/api/` | Dashboard API (`/filters`, `/dashboard`, `/export`) |
 | `sql/postgres_schema.sql` | Serving schema, indexes, read-only role |
 | `sql/athena.sql` | Athena tables and validation queries |
 | `stepfunctions/pipeline.asl.json` | State machine |

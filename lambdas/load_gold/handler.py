@@ -13,7 +13,7 @@ For every table it:
 Environment variables:
     BUCKET, DB_HOST, DB_NAME (default nyc311), DB_USER, DB_PASSWORD, DB_PORT (5432)
     RO_PASSWORD   password to set for the read-only dashboard_ro role
-Packaging: needs the pg8000 layer (see scripts/build_layer.sh).
+Packaging: needs the pg8000 layer (see scripts/build.sh).
 """
 import io
 import json

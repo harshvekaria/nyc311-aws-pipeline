@@ -4,16 +4,19 @@ Dashboard API (API Gateway HTTP API -> this Lambda -> RDS PostgreSQL).
 Routes
     GET /filters     -> available districts, complaint types, agencies, date bounds
     GET /dashboard   -> every dataset the dashboard needs, for one filter selection
-        query params (all optional):
+    GET /export      -> the matching gold_daily_fact rows as a CSV download (max 50,000 rows)
+        query params for /dashboard and /export (all optional):
             districts=1,5,33        council districts
-            types=Noise - Residential,Illegal Parking
+            types=Noise - Residential|Illegal Parking   (pipe-separated)
             start=2026-04-01        inclusive
             end=2026-10-31          inclusive
 
 All filters are passed as bound parameters (never string-formatted into SQL).
 Runs in the VPC; connects as the read-only role dashboard_ro.
 """
+import csv
 import datetime as dt
+import io
 import json
 import os
 import ssl
@@ -67,6 +70,32 @@ def _json_default(o):
 
 def respond(status, body):
     return {"statusCode": status, "headers": CORS, "body": json.dumps(body, default=_json_default)}
+
+
+EXPORT_MAX_ROWS = 50000  # keeps the response under Lambda's 6 MB limit
+
+
+def export_csv(districts, types, start, end):
+    """Detail rows for the current filters, as CSV text. Raises ValueError if too many rows."""
+    w, p = where(districts, types)
+    rows = q(f"""
+        SELECT created_day, council_district, borough, complaint_type, agency,
+               request_count, closed_count, open_count,
+               round((sum_resolution_hours / nullif(closed_count, 0))::numeric, 2) AS avg_resolution_hours
+        FROM gold.gold_daily_fact WHERE {w}
+        ORDER BY created_day, council_district, complaint_type, agency
+        LIMIT {EXPORT_MAX_ROWS + 1}""", start=start, end=end, **p)
+    if len(rows) > EXPORT_MAX_ROWS:
+        raise ValueError(f"More than {EXPORT_MAX_ROWS:,} rows match. Narrow the date range, "
+                         "districts or complaint types and try again.")
+    buf = io.StringIO()
+    cols = ["created_day", "council_district", "borough", "complaint_type", "agency",
+            "request_count", "closed_count", "open_count", "avg_resolution_hours"]
+    writer = csv.DictWriter(buf, fieldnames=cols)
+    writer.writeheader()
+    for r in rows:
+        writer.writerow({k: ("" if r[k] is None else r[k]) for k in cols})
+    return buf.getvalue(), len(rows)
 
 
 def parse_filters(qs):
@@ -179,6 +208,12 @@ def handler(event, context):
             return respond(200, filters())
         if path.endswith("/dashboard"):
             return respond(200, dashboard(*parse_filters(event.get("queryStringParameters"))))
+        if path.endswith("/export"):
+            body, n = export_csv(*parse_filters(event.get("queryStringParameters")))
+            headers = {**CORS, "Content-Type": "text/csv; charset=utf-8", "X-Row-Count": str(n),
+                       "Access-Control-Expose-Headers": "X-Row-Count",
+                       "Content-Disposition": 'attachment; filename="nyc311_export.csv"'}
+            return {"statusCode": 200, "headers": headers, "body": body}
         return respond(404, {"error": "not found"})
     except ValueError as e:
         return respond(400, {"error": str(e)})
